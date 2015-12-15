@@ -162,6 +162,7 @@ bool depth_enabled;
 DepthSense::DepthNode::CameraMode depth_mode;
 DepthSense::FrameFormat depth_frame_format;
 int depth_frame_rate;
+bool depth_saturation;
 
 /* Color sensor parameters */
 bool color_enabled;
@@ -595,6 +596,7 @@ void configureDepthNode()
     config.frameFormat = depth_frame_format;
     config.framerate = depth_frame_rate;
     config.mode = depth_mode;
+    config.saturation = depth_saturation;
     config.saturation = true;
 
     g_context.requestControl(g_dnode, 0);
@@ -788,11 +790,13 @@ void reconfigure_callback(softkinetic_camera::SoftkineticConfig& config, uint32_
     depth_mode         = depthMode(config.depth_mode);
     depth_frame_format = depthFrameFormat(config.depth_frame_format);
     depth_frame_rate   = config.depth_frame_rate;
+    depth_saturation   = config.depth_saturation;
 
     color_enabled      = config.enable_color;
     color_compression  = colorCompression(config.color_compression);
     color_frame_format = colorFrameFormat(config.color_frame_format);
     color_frame_rate   = config.color_frame_rate;
+    color_pl_freq      = colorPLFreq(config.color_pl_freq);
 
     ROS_DEBUG_STREAM("New configuration:\n" <<
                      //"camera_link = " << camera_link << "\n" <<
@@ -820,11 +824,14 @@ void reconfigure_callback(softkinetic_camera::SoftkineticConfig& config, uint32_
                      "depth_mode = " << config.depth_mode << "\n" <<
                      "depth_frame_format = " << config.depth_frame_format << "\n" <<
                      "depth_frame_rate = " << depth_frame_rate << "\n" <<
+                     "depth_saturation = " << depth_saturation << "\n" <<
 
                      "enable_color = " << (color_enabled ? "ON" : "OFF" ) << "\n" <<
                      "color_compression = " << config.color_compression << "\n" <<
                      "color_frame_format = " << config.color_frame_format << "\n" <<
-                     "color_frame_rate = " << color_frame_rate << "\n");
+                     "color_frame_rate = " << color_frame_rate <<
+                     "color_pl_freq = " << config.color_pl_freq <<
+                     "\n");
 }
 
 /*----------------------------------------------------------------------------*/
@@ -967,6 +974,7 @@ int main(int argc, char* argv[])
     depth_frame_format = depthFrameFormat(depth_frame_format_str);
 
     nh.param<int>("depth_frame_rate", depth_frame_rate, 25);
+    nh.param<bool>("depth_saturation", depth_saturation, true);
 
     nh.param<bool>("enable_color", color_enabled, true);
     std::string color_compression_str;
