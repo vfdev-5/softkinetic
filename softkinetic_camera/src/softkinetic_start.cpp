@@ -597,7 +597,6 @@ void configureDepthNode()
     config.framerate = depth_frame_rate;
     config.mode = depth_mode;
     config.saturation = depth_saturation;
-    config.saturation = true;
 
     g_context.requestControl(g_dnode, 0);
 
@@ -711,12 +710,13 @@ void configureNode(Node node)
         g_context.registerNode(node);
     }
 
-    if ((node.is<AudioNode>()) && (!g_anode.isSet()))
-    {
-        g_anode = node.as<AudioNode>();
-        configureAudioNode();
-        g_context.registerNode(node);
-    }
+// DISABLE Audio node to prevent USB bandwith saturation
+//    if ((node.is<AudioNode>()) && (!g_anode.isSet()))
+//    {
+//        g_anode = node.as<AudioNode>();
+//        configureAudioNode();
+//        g_context.registerNode(node);
+//    }
 }
 
 /*----------------------------------------------------------------------------*/
