@@ -166,9 +166,6 @@ DepthSense::DepthNode::CameraMode depth_mode;
 DepthSense::FrameFormat depth_frame_format;
 int depth_frame_rate;
 bool depth_saturation;
-
-bool depth_enable_uv_map;
-bool depth_enable_verticies_fp;
 bool depth_enable_accelerometer;
 
 /* Color sensor parameters */
@@ -465,7 +462,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         std::size_t data_size = img_depth.width * img_depth.height;
         img_depth.data.resize(data_size * sizeof(float));
 
-        if (color_enabled & rgb_info.D.size() == 0)
+        if (rgb_info.D.size() == 0)
         {
             // User didn't provide a calibration file for the color camera, so
             // fill camera info with the parameters provided by the camera itself
@@ -612,10 +609,11 @@ void configureDepthNode()
     if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Request control on depth node");
     g_context.requestControl(g_dnode, 5000);
 
-//    g_dnode.setEnableUvMap(depth_enable_uv_map);
-//    g_dnode.setEnableVerticesFloatingPoint(depth_enable_verticies_fp);
+    g_dnode.setEnableUvMap(true);
+    g_dnode.setEnableVerticesFloatingPoint(true);
     g_dnode.setEnableDepthMapFloatingPoint(true);
-//    g_dnode.setEnableAccelerometer(depth_enable_accelerometer);
+
+    g_dnode.setEnableAccelerometer(depth_enable_accelerometer);
 
     g_dnode.setConfidenceThreshold(confidence_threshold);
 
@@ -657,7 +655,7 @@ void configureNode(Node node)
             g_context.registerNode(node);
         }
 
-        if ((node.is<ColorNode>()) && (!g_cnode.isSet()) && (color_enabled))
+        if ((node.is<ColorNode>()) && (!g_cnode.isSet()))
         {
             if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Configure and register color node");
             g_cnode = node.as<ColorNode>();
@@ -970,12 +968,8 @@ int main(int argc, char* argv[])
     nh.param<int>("depth_frame_rate", depth_frame_rate, 25);
     nh.param<bool>("depth_saturation", depth_saturation, true);
 
-    nh.param<bool>("depth_enable_uv_map", depth_enable_uv_map, false);
-    nh.param<bool>("depth_enable_verticies_fp", depth_enable_verticies_fp, false);
     nh.param<bool>("depth_enable_accelerometer", depth_enable_accelerometer, false);
 
-
-    nh.param<bool>("enable_color", color_enabled, true);
     std::string color_compression_str;
     nh.param<std::string>("color_compression", color_compression_str, "MJPEG");
     color_compression = colorCompression(color_compression_str);
@@ -1006,16 +1000,13 @@ int main(int argc, char* argv[])
         pub_depth_info = nh.advertise<sensor_msgs::CameraInfo>("depth/camera_info", 1);
     }
 
-    if (color_enabled)
-    {
-        pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>("rgb/camera_info", 1);
-        pub_rgb = it.advertise("rgb/image_color", 1);
-        pub_mono = it.advertise("rgb/image_mono", 1);
-    }
+    pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>("rgb/camera_info", 1);
+    pub_rgb = it.advertise("rgb/image_color", 1);
+    pub_mono = it.advertise("rgb/image_mono", 1);
 
     // Setup calibration files
     std::string calibration_file;
-    if (color_enabled & nh.getParam("rgb_calibration_file", calibration_file))
+    if (nh.getParam("rgb_calibration_file", calibration_file))
     {
         camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
         rgb_info = camera_info_manager.getCameraInfo();
