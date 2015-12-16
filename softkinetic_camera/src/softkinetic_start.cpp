@@ -91,6 +91,9 @@
 
 #include <DepthSense.hxx>
 
+bool VERBOSE = false;
+bool VERBOSE_2 = false;
+
 using namespace DepthSense;
 using namespace message_filters;
 using namespace std;
@@ -164,12 +167,22 @@ DepthSense::FrameFormat depth_frame_format;
 int depth_frame_rate;
 bool depth_saturation;
 
+bool depth_enable_uv_map;
+bool depth_enable_verticies_fp;
+bool depth_enable_accelerometer;
+
 /* Color sensor parameters */
 bool color_enabled;
 DepthSense::CompressionType color_compression;
 DepthSense::FrameFormat color_frame_format;
 int color_frame_rate;
 DepthSense::PowerLineFrequency color_pl_freq;
+
+/* Audio sensor parameters */
+bool audio_enabled; // false by default
+
+
+/*----------------------------------------------------------------------------*/
 
 DepthSense::DepthNode::CameraMode depthMode(const std::string& depth_mode_str)
 {
@@ -225,6 +238,7 @@ DepthSense::PowerLineFrequency colorPLFreq(const std::string & color_pl_freq_str
 // New audio sample event handler
 void onNewAudioSample(AudioNode node, AudioNode::NewSampleReceivedData data)
 {
+    if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : onNewAudioSample");
     //printf("A#%u: %d\n",g_aFrames,data.audioData.size());
     ++g_aFrames;
 }
@@ -233,6 +247,7 @@ void onNewAudioSample(AudioNode node, AudioNode::NewSampleReceivedData data)
 // New color sample event handler
 void onNewColorSample(ColorNode node, ColorNode::NewSampleReceivedData data)
 {
+    if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : onNewColorSample");
     // If this is the first sample, we fill all the constant values
     // on image and camera info messages to increase working rate
     if (img_rgb.data.size() == 0)
@@ -383,10 +398,13 @@ void filterFrustumCulling(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_to_filter
 
 void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs::CameraInfo& cam_info)
 {
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : setupCameraInfo");
     cam_info.distortion_model = "plumb_bob";
     cam_info.height = params.height;
     cam_info.width  = params.width;
 
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Distortion parameters D = [k1, k2, t1, t2, k3]");
+    //if (VERBOSE) ROS_INFO_STREAM("VERBOSE : " << params.k1 << ", " << params.k2 << ", " << params.t1 << ", " << params.t1 << ", " << params.k3);
     // Distortion parameters D = [k1, k2, t1, t2, k3]
     cam_info.D.resize(5);
     cam_info.D[0] = params.k1;
@@ -395,6 +413,8 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.D[3] = params.p2;
     cam_info.D[4] = params.k3;
 
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Intrinsic camera matrix for the raw (distorted) images");
+    //if (VERBOSE) ROS_INFO_STREAM("VERBOSE : " << params.fx << ", " << params.cx << ", " << params.fy << ", " << params.cy);
     // Intrinsic camera matrix for the raw (distorted) images:
     //     [fx  0 cx]
     // K = [ 0 fy cy]
@@ -405,6 +425,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.K[5] = params.cy;
     cam_info.K[8] = 1.0;
 
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Rectification matrix");
     // Rectification matrix (stereo cameras only)
     //     [1 0 0]
     // R = [0 1 0]
@@ -418,6 +439,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     //     [fx'  0  cx' Tx]
     // P = [ 0  fy' cy' Ty]
     //     [ 0   0   1   0]
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Projection/camera matrix");
     cam_info.P[0] = params.fx;
     cam_info.P[2] = params.cx;
     cam_info.P[5] = params.fy;
@@ -428,10 +450,13 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
 // New depth sample event
 void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
 {
+    if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : onNewDepthSample");
+
     // If this is the first sample, we fill all the constant values
     // on image and camera info messages to increase working rate
     if (img_depth.data.size() == 0)
     {
+        if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > img_depth.data.size() == 0");
         FrameFormat_toResolution(data.captureConfiguration.frameFormat,
                                  (int32_t*)&img_depth.width, (int32_t*)&img_depth.height);
         img_depth.encoding = sensor_msgs::image_encodings::TYPE_32FC1;
@@ -440,7 +465,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         std::size_t data_size = img_depth.width * img_depth.height;
         img_depth.data.resize(data_size * sizeof(float));
 
-        if (rgb_info.D.size() == 0)
+        if (color_enabled & rgb_info.D.size() == 0)
         {
             // User didn't provide a calibration file for the color camera, so
             // fill camera info with the parameters provided by the camera itself
@@ -468,8 +493,10 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
     ++g_dFrames;
 
     // Dump depth map on image message, though we must do some post-processing for saturated pixels
+    if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > memcpy");
     std::memcpy(img_depth.data.data(), data.depthMapFloatingPoint, img_depth.data.size());
 
+    if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > for loop");
     for (int count = 0; count < w * h; count++)
     {
         // Saturated pixels on depthMapFloatingPoint have -1 value, but on openni are NaN
@@ -489,11 +516,11 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         current_cloud->points[count].z =   data.verticesFloatingPoint[count].y;
 
         // Get mapping between depth map and color map, assuming we have a RGB image
-        if (img_rgb.data.size() == 0)
-        {
-            ROS_WARN_THROTTLE(2.0, "Color image is empty; pointcloud will be colorless");
-            continue;
-        }
+//        if (img_rgb.data.size() == 0)
+//        {
+//            ROS_WARN_THROTTLE(2.0, "Color image is empty; pointcloud will be colorless");
+//            continue;
+//        }
         UV uv = data.uvMap[count];
         if (uv.u != -FLT_MAX && uv.v != -FLT_MAX)
         {
@@ -512,24 +539,29 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
     // we create (with proper values for width and height) that any other filter would destroy
     if (use_voxel_grid_filter)
     {
+        if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > use_voxel_grid_filter");
         downsampleCloud(current_cloud);
     }
 
     // Check for usage of passthrough filtering
     if (use_passthrough_filter)
     {
+        if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > use_passthrough_filter");
         filterPassThrough(current_cloud);
     }
 
     // Check for usage of frustum culling filtering
     if (use_frustum_culling_filter)
     {
+        if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > use_frustum_culling_filter");
         filterFrustumCulling(current_cloud);
     }
 
     // Check for usage of radius outlier filtering
     if (use_radius_outlier_filter)
     {
+
+        if (VERBOSE_2) ROS_INFO_STREAM("VERBOSE_2 : > use_radius_outlier_filter");
         // XXX Use any other filter before this one to remove the large amount of all-zero points the
         // camera creates for saturated pixels; if not, radius outlier filter takes really, really long
         if (use_voxel_grid_filter || use_passthrough_filter || use_frustum_culling_filter)
@@ -539,6 +571,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
     }
 
     // Convert current_cloud to PointCloud2 and publish
+    ROS_INFO_STREAM("> publish depth data");
     pcl::toROSMsg(*current_cloud, cloud);
 
     img_depth.header.stamp = ros::Time::now();
@@ -557,33 +590,11 @@ void configureAudioNode()
     AudioNode::Configuration config = g_anode.getConfiguration();
     config.sampleRate = 44100;
 
-    try
-    {
-        g_context.requestControl(g_anode, 0);
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Request control on audio node");
+    g_context.requestControl(g_anode, 5000);
 
-        g_anode.setConfiguration(config);
-        g_anode.setInputMixerLevel(0.5f);
-    }
-    catch (ArgumentException& e)
-    {
-        printf("Argument Exception: %s\n", e.what());
-    }
-    catch (UnauthorizedAccessException& e)
-    {
-        printf("Unauthorized Access Exception: %s\n", e.what());
-    }
-    catch (ConfigurationException& e)
-    {
-        printf("Configuration Exception: %s\n", e.what());
-    }
-    catch (StreamingException& e)
-    {
-        printf("Streaming Exception: %s\n", e.what());
-    }
-    catch (TimeoutException&)
-    {
-        printf("TimeoutException\n");
-    }
+    g_anode.setConfiguration(config);
+    g_anode.setInputMixerLevel(0.5f);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -598,48 +609,18 @@ void configureDepthNode()
     config.mode = depth_mode;
     config.saturation = depth_saturation;
 
-    g_context.requestControl(g_dnode, 0);
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Request control on depth node");
+    g_context.requestControl(g_dnode, 5000);
 
-    g_dnode.setEnableUvMap(true);
-    g_dnode.setEnableVerticesFloatingPoint(true);
+//    g_dnode.setEnableUvMap(depth_enable_uv_map);
+//    g_dnode.setEnableVerticesFloatingPoint(depth_enable_verticies_fp);
     g_dnode.setEnableDepthMapFloatingPoint(true);
+//    g_dnode.setEnableAccelerometer(depth_enable_accelerometer);
 
     g_dnode.setConfidenceThreshold(confidence_threshold);
 
-    try
-    {
-        g_context.requestControl(g_dnode, 0);
+    g_dnode.setConfiguration(config);
 
-        g_dnode.setConfiguration(config);
-    }
-    catch (ArgumentException& e)
-    {
-        printf("Argument Exception: %s\n", e.what());
-    }
-    catch (UnauthorizedAccessException& e)
-    {
-        printf("Unauthorized Access Exception: %s\n", e.what());
-    }
-    catch (IOException& e)
-    {
-        printf("IO Exception: %s\n", e.what());
-    }
-    catch (InvalidOperationException& e)
-    {
-        printf("Invalid Operation Exception: %s\n", e.what());
-    }
-    catch (ConfigurationException& e)
-    {
-        printf("Configuration Exception: %s\n", e.what());
-    }
-    catch (StreamingException& e)
-    {
-        printf("Streaming Exception: %s\n", e.what());
-    }
-    catch (TimeoutException&)
-    {
-        printf("TimeoutException\n");
-    }
 }
 
 /*----------------------------------------------------------------------------*/
@@ -655,13 +636,43 @@ void configureColorNode()
     config.powerLineFrequency = color_pl_freq;
     config.framerate = color_frame_rate;
 
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Request control on color node");
+    g_context.requestControl(g_cnode, 5000);
+
     g_cnode.setEnableColorMap(true);
 
+    g_cnode.setConfiguration(config);
+}
+
+/*----------------------------------------------------------------------------*/
+void configureNode(Node node)
+{
     try
     {
-        g_context.requestControl(g_cnode, 0);
+        if ((node.is<DepthNode>()) && (!g_dnode.isSet()) && (depth_enabled))
+        {
+            if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Configure and register depth node");
+            g_dnode = node.as<DepthNode>();
+            configureDepthNode();
+            g_context.registerNode(node);
+        }
 
-        g_cnode.setConfiguration(config);
+        if ((node.is<ColorNode>()) && (!g_cnode.isSet()) && (color_enabled))
+        {
+            if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Configure and register color node");
+            g_cnode = node.as<ColorNode>();
+            configureColorNode();
+            g_context.registerNode(node);
+        }
+
+        if ((node.is<AudioNode>()) && (!g_anode.isSet()) && (audio_enabled))
+        {
+            if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Configure and register audio node");
+            g_anode = node.as<AudioNode>();
+            configureAudioNode();
+            g_context.registerNode(node);
+        }
+
     }
     catch (ArgumentException& e)
     {
@@ -691,32 +702,11 @@ void configureColorNode()
     {
         printf("TimeoutException\n");
     }
-}
-
-/*----------------------------------------------------------------------------*/
-void configureNode(Node node)
-{
-    if ((node.is<DepthNode>()) && (!g_dnode.isSet()) && (depth_enabled))
+    catch (TransportException& e)
     {
-        g_dnode = node.as<DepthNode>();
-        configureDepthNode();
-        g_context.registerNode(node);
+        printf("TransportException: %s\n", e.what());
     }
 
-    if ((node.is<ColorNode>()) && (!g_cnode.isSet()) && (color_enabled))
-    {
-        g_cnode = node.as<ColorNode>();
-        configureColorNode();
-        g_context.registerNode(node);
-    }
-
-// DISABLE Audio node to prevent USB bandwith saturation
-//    if ((node.is<AudioNode>()) && (!g_anode.isSet()))
-//    {
-//        g_anode = node.as<AudioNode>();
-//        configureAudioNode();
-//        g_context.registerNode(node);
-//    }
 }
 
 /*----------------------------------------------------------------------------*/
@@ -740,6 +730,7 @@ void onNodeDisconnected(Device device, Device::NodeRemovedData data)
 /*----------------------------------------------------------------------------*/
 void onDeviceConnected(Context context, Context::DeviceAddedData data)
 {
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : On device connected : " << data.device.getModel());
     if (!g_bDeviceFound)
     {
         data.device.nodeAddedEvent().connect(&onNodeConnected);
@@ -757,12 +748,15 @@ void onDeviceDisconnected(Context context, Context::DeviceRemovedData data)
 
 void sigintHandler(int sig)
 {
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : sigintHandler");
     g_context.quit();
     ros::shutdown();
 }
 
 void reconfigure_callback(softkinetic_camera::SoftkineticConfig& config, uint32_t level)
 {
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : reconfigure_callback");
+
     // @todo this one isn't trivial
     // camera_link = config.camera_link;
 
@@ -976,6 +970,11 @@ int main(int argc, char* argv[])
     nh.param<int>("depth_frame_rate", depth_frame_rate, 25);
     nh.param<bool>("depth_saturation", depth_saturation, true);
 
+    nh.param<bool>("depth_enable_uv_map", depth_enable_uv_map, false);
+    nh.param<bool>("depth_enable_verticies_fp", depth_enable_verticies_fp, false);
+    nh.param<bool>("depth_enable_accelerometer", depth_enable_accelerometer, false);
+
+
     nh.param<bool>("enable_color", color_enabled, true);
     std::string color_compression_str;
     nh.param<std::string>("color_compression", color_compression_str, "MJPEG");
@@ -991,29 +990,43 @@ int main(int argc, char* argv[])
     nh.param<std::string>("color_pl_freq", color_pl_freq_str, "60");
     color_pl_freq = colorPLFreq(color_pl_freq_str);
 
+    nh.param<bool>("enable_audio", audio_enabled, false);
+
+    nh.param<bool>("verbose", VERBOSE, false);
+    nh.param<bool>("verbose_2", VERBOSE_2, false);
+
     // Initialize image transport object
     image_transport::ImageTransport it(nh);
 
     // Initialize publishers
-    pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("depth/points", 1);
-    pub_rgb = it.advertise("rgb/image_color", 1);
-    pub_mono = it.advertise("rgb/image_mono", 1);
-    pub_depth = it.advertise("depth/image_raw", 1);
-    pub_depth_info = nh.advertise<sensor_msgs::CameraInfo>("depth/camera_info", 1);
-    pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>("rgb/camera_info", 1);
+    if (depth_enabled)
+    {
+        pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("depth/points", 1);
+        pub_depth = it.advertise("depth/image_raw", 1);
+        pub_depth_info = nh.advertise<sensor_msgs::CameraInfo>("depth/camera_info", 1);
+    }
 
+    if (color_enabled)
+    {
+        pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>("rgb/camera_info", 1);
+        pub_rgb = it.advertise("rgb/image_color", 1);
+        pub_mono = it.advertise("rgb/image_mono", 1);
+    }
+
+    // Setup calibration files
     std::string calibration_file;
-    if (nh.getParam("rgb_calibration_file", calibration_file))
+    if (color_enabled & nh.getParam("rgb_calibration_file", calibration_file))
     {
         camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
         rgb_info = camera_info_manager.getCameraInfo();
     }
 
-    if (nh.getParam("depth_calibration_file", calibration_file))
+    if (depth_enabled & nh.getParam("depth_calibration_file", calibration_file))
     {
         camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
         depth_info = camera_info_manager.getCameraInfo();
     }
+
 
     g_context = Context::create("softkinetic");
 
@@ -1052,23 +1065,26 @@ int main(int argc, char* argv[])
     }
 
     // Enable dynamic reconfigure
-    ros::NodeHandle nh_cfg("~");
-    ros::CallbackQueue callback_queue_cfg;
-    nh_cfg.setCallbackQueue(&callback_queue_cfg);
+//    ros::NodeHandle nh_cfg("~");
+//    ros::CallbackQueue callback_queue_cfg;
+//    nh_cfg.setCallbackQueue(&callback_queue_cfg);
 
-    dynamic_reconfigure::Server<softkinetic_camera::SoftkineticConfig> server(nh_cfg);
-    server.setCallback(boost::bind(&reconfigure_callback, _1, _2));
+//    dynamic_reconfigure::Server<softkinetic_camera::SoftkineticConfig> server(nh_cfg);
+//    server.setCallback(boost::bind(&reconfigure_callback, _1, _2));
 
     // Handle the dynamic reconfigure server callback on a
     // separate thread from the g_context.run() called below
-    ros::AsyncSpinner spinner(1, &callback_queue_cfg);
-    spinner.start();
+//    ros::AsyncSpinner spinner(1, &callback_queue_cfg);
+//    spinner.start();
 
-    // Loop while ros core is operational or Ctrl-C is used
+
     if (ros_node_shutdown)
     {
+        if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Shutdown");
         ros::shutdown();
     }
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Loop while ros core is operational or Ctrl-C is used");
+    // Loop while ros core is operational or Ctrl-C is used
     while (ros::ok())
     {
         g_context.startNodes();
