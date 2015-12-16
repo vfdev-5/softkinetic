@@ -400,8 +400,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.height = params.height;
     cam_info.width  = params.width;
 
-    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Distortion parameters D = [k1, k2, t1, t2, k3]");
-    //if (VERBOSE) ROS_INFO_STREAM("VERBOSE : " << params.k1 << ", " << params.k2 << ", " << params.t1 << ", " << params.t1 << ", " << params.k3);
+//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Distortion parameters D = [k1, k2, t1, t2, k3]");
     // Distortion parameters D = [k1, k2, t1, t2, k3]
     cam_info.D.resize(5);
     cam_info.D[0] = params.k1;
@@ -410,8 +409,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.D[3] = params.p2;
     cam_info.D[4] = params.k3;
 
-    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Intrinsic camera matrix for the raw (distorted) images");
-    //if (VERBOSE) ROS_INFO_STREAM("VERBOSE : " << params.fx << ", " << params.cx << ", " << params.fy << ", " << params.cy);
+//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Intrinsic camera matrix for the raw (distorted) images");
     // Intrinsic camera matrix for the raw (distorted) images:
     //     [fx  0 cx]
     // K = [ 0 fy cy]
@@ -422,7 +420,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.K[5] = params.cy;
     cam_info.K[8] = 1.0;
 
-    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Rectification matrix");
+//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Rectification matrix");
     // Rectification matrix (stereo cameras only)
     //     [1 0 0]
     // R = [0 1 0]
@@ -436,7 +434,7 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     //     [fx'  0  cx' Tx]
     // P = [ 0  fy' cy' Ty]
     //     [ 0   0   1   0]
-    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Projection/camera matrix");
+//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Projection/camera matrix");
     cam_info.P[0] = params.fx;
     cam_info.P[2] = params.cx;
     cam_info.P[5] = params.fy;
@@ -568,7 +566,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
     }
 
     // Convert current_cloud to PointCloud2 and publish
-    ROS_INFO_STREAM("> publish depth data");
+    if (VERBOSE_2) ROS_INFO_STREAM("> publish depth data");
     pcl::toROSMsg(*current_cloud, cloud);
 
     img_depth.header.stamp = ros::Time::now();
