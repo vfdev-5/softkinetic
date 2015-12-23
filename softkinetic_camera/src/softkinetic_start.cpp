@@ -394,13 +394,12 @@ void filterFrustumCulling(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_to_filter
 }
 
 void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs::CameraInfo& cam_info)
-{
-    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : setupCameraInfo");
+{    
     cam_info.distortion_model = "plumb_bob";
     cam_info.height = params.height;
     cam_info.width  = params.width;
 
-//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Distortion parameters D = [k1, k2, t1, t2, k3]");
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Distortion parameters : k1=" << params.k1 << ", k2=" << params.k2 << ", t1=" << params.p1 << ", t2=" << params.p2 << ", k3=" << params.k3);
     // Distortion parameters D = [k1, k2, t1, t2, k3]
     cam_info.D.resize(5);
     cam_info.D[0] = params.k1;
@@ -409,7 +408,8 @@ void setupCameraInfo(const DepthSense::IntrinsicParameters& params, sensor_msgs:
     cam_info.D[3] = params.p2;
     cam_info.D[4] = params.k3;
 
-//    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Intrinsic camera matrix for the raw (distorted) images");
+    if (VERBOSE) ROS_INFO_STREAM("VERBOSE : > Intrinsic camera matrix for the raw (distorted) images : fx=" << params.fx << ", fy=" << params.fy << ", cx=" << params.cx << ", cy=" << params.cy);
+
     // Intrinsic camera matrix for the raw (distorted) images:
     //     [fx  0 cx]
     // K = [ 0 fy cy]
@@ -464,6 +464,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         {
             // User didn't provide a calibration file for the color camera, so
             // fill camera info with the parameters provided by the camera itself
+			if (VERBOSE) ROS_INFO_STREAM("VERBOSE : setupCameraInfo with color intrinsics");
             setupCameraInfo(data.stereoCameraParameters.colorIntrinsics, rgb_info);
         }
 
@@ -471,6 +472,7 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         {
             // User didn't provide a calibration file for the depth camera, so
             // fill camera info with the parameters provided by the camera itself
+			if (VERBOSE) ROS_INFO_STREAM("VERBOSE : setupCameraInfo with depth intrinsics");
             setupCameraInfo(data.stereoCameraParameters.depthIntrinsics, depth_info);
         }
     }
@@ -511,11 +513,11 @@ void onNewDepthSample(DepthNode node, DepthNode::NewSampleReceivedData data)
         current_cloud->points[count].z =   data.verticesFloatingPoint[count].y;
 
         // Get mapping between depth map and color map, assuming we have a RGB image
-//        if (img_rgb.data.size() == 0)
-//        {
-//            ROS_WARN_THROTTLE(2.0, "Color image is empty; pointcloud will be colorless");
-//            continue;
-//        }
+        if (img_rgb.data.size() == 0)
+        {
+            ROS_WARN_THROTTLE(2.0, "Color image is empty; pointcloud will be colorless");
+            continue;
+        }
         UV uv = data.uvMap[count];
         if (uv.u != -FLT_MAX && uv.v != -FLT_MAX)
         {
@@ -993,29 +995,56 @@ int main(int argc, char* argv[])
     // Initialize publishers
     if (depth_enabled)
     {
-        pub_cloud = nh.advertise<sensor_msgs::PointCloud2>("depth/points", 1);
-        pub_depth = it.advertise("depth/image_raw", 1);
-        pub_depth_info = nh.advertise<sensor_msgs::CameraInfo>("depth/camera_info", 1);
+		std::string depth_points_topic;
+		std::string depth_image_raw_topic;
+		std::string depth_camera_info_topic;
+		nh.param<std::string>("output_depth_points", depth_points_topic, "depth/points");
+		nh.param<std::string>("output_depth_image_raw", depth_image_raw_topic, "depth/image_raw");
+		nh.param<std::string>("output_depth_camera_info", depth_camera_info_topic, "depth/camera_info");
+
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output depth points topic : " << depth_points_topic);
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output depth raw image topic : " << depth_image_raw_topic);
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output depth camera info topic : " << depth_camera_info_topic);
+
+        pub_cloud = nh.advertise<sensor_msgs::PointCloud2>(depth_points_topic, 1);
+        pub_depth = it.advertise(depth_image_raw_topic, 1);
+        pub_depth_info = nh.advertise<sensor_msgs::CameraInfo>(depth_camera_info_topic, 1);
     }
 
-    pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>("rgb/camera_info", 1);
-    pub_rgb = it.advertise("rgb/image_color", 1);
-    pub_mono = it.advertise("rgb/image_mono", 1);
+	{
+		std::string rgb_camera_info_topic;	
+		std::string rgb_image_color_topic;
+		std::string rgb_image_mono_topic;
+		nh.param<std::string>("output_rgb_camera_info", rgb_camera_info_topic, "rgb/camera_info");
+		nh.param<std::string>("output_rgb_image_color", rgb_image_color_topic, "rgb/image_color");
+		nh.param<std::string>("output_rgb_image_mono", rgb_image_mono_topic, "rgb/image_mono");
+
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output rgb color image topic : " << rgb_image_color_topic);
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output rgb mono image topic : " << rgb_image_mono_topic);
+		if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Output rgb camera info topic : " << rgb_camera_info_topic);
+
+		pub_rgb_info = nh.advertise<sensor_msgs::CameraInfo>(rgb_camera_info_topic, 1);
+		pub_rgb = it.advertise(rgb_image_color_topic, 1);
+		pub_mono = it.advertise(rgb_image_mono_topic, 1);
+	}
 
     // Setup calibration files
-    std::string calibration_file;
-    if (nh.getParam("rgb_calibration_file", calibration_file))
-    {
-        camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
-        rgb_info = camera_info_manager.getCameraInfo();
-    }
+	{
+		std::string calibration_file;
+		if (nh.getParam("rgb_calibration_file", calibration_file))
+		{
+			if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Found rgb calibration file : " << calibration_file);
+	        camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
+	        rgb_info = camera_info_manager.getCameraInfo();
+		}
 
-    if (depth_enabled & nh.getParam("depth_calibration_file", calibration_file))
-    {
-        camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
-        depth_info = camera_info_manager.getCameraInfo();
-    }
-
+		if (depth_enabled && nh.getParam("depth_calibration_file", calibration_file))
+		{
+			if (VERBOSE) ROS_INFO_STREAM("VERBOSE : Found depth calibration file : " << calibration_file);
+		    camera_info_manager::CameraInfoManager camera_info_manager(nh, "senz3d", "file://" + calibration_file);
+		    depth_info = camera_info_manager.getCameraInfo();
+		}
+	}
 
     g_context = Context::create("softkinetic");
 
@@ -1054,17 +1083,17 @@ int main(int argc, char* argv[])
     }
 
     // Enable dynamic reconfigure
-//    ros::NodeHandle nh_cfg("~");
-//    ros::CallbackQueue callback_queue_cfg;
-//    nh_cfg.setCallbackQueue(&callback_queue_cfg);
+    ros::NodeHandle nh_cfg("~");
+    ros::CallbackQueue callback_queue_cfg;
+    nh_cfg.setCallbackQueue(&callback_queue_cfg);
 
-//    dynamic_reconfigure::Server<softkinetic_camera::SoftkineticConfig> server(nh_cfg);
-//    server.setCallback(boost::bind(&reconfigure_callback, _1, _2));
+    dynamic_reconfigure::Server<softkinetic_camera::SoftkineticConfig> server(nh_cfg);
+    server.setCallback(boost::bind(&reconfigure_callback, _1, _2));
 
     // Handle the dynamic reconfigure server callback on a
     // separate thread from the g_context.run() called below
-//    ros::AsyncSpinner spinner(1, &callback_queue_cfg);
-//    spinner.start();
+    ros::AsyncSpinner spinner(1, &callback_queue_cfg);
+    spinner.start();
 
 
     if (ros_node_shutdown)
